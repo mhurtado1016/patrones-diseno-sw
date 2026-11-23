@@ -116,8 +116,17 @@ Cómo verificar: `pip install -r requirements.txt && python -m pytest` → 16 pa
 *(Completar tras la revisión: observaciones recibidas, cambios aplicados y valoración del trabajo del compañero según la rúbrica.)*
 
 ## 8. Reflexión personal
-*(Borrador para que lo adaptes con tu experiencia — es la parte que debe ser tuya.)*
-- **Lo más fácil:** detectar la duplicación del token y de la lectura/escritura del JSON; Decorator y Strategy resolvieron el problema con muy poco código.
-- **Lo más desafiante:** distinguir qué comportamientos eran bugs y cuáles intencionales, y decidir cuánto cambiar sin romper el contrato de la API. Escribir las pruebas ayudó a fijar esas decisiones.
-- **Patrones más útiles:** Decorator (mayor reducción de código) y Repository (separa el dominio del almacenamiento y facilita cambiar de JSON a una BD).
-- **Aprendizaje:** aplicar patrones sin un problema concreto añade complejidad; aquí cada uno nació de un smell identificado.
+
+**Lo más fácil.** Detectar los problemas evidentes: el `is_valid_token` copiado en tres archivos y el mismo bloque de validación repetido en casi todos los métodos. Una vez identificada la duplicación, el patrón Decorator la resolvió con muy poco código y el resultado se notó de inmediato en la lectura de los endpoints.
+
+**Lo más desafiante.** Separar lo que era un bug de lo que era comportamiento intencional. Al ejecutar el original descubrí que el token del login no funcionaba, que los favoritos se "guardaban" sin persistir y que la categoría duplicada se aceptaba. Tuve que decidir cuánto cambiar sin romper el contrato de la API descrito en el README. Escribir las pruebas me ayudó a fijar esas decisiones y a comprobar que cada refactorización no rompía nada. También fue difícil resistir la tentación de sobre-ingeniar (JWT, SQLAlchemy, blueprints) cuando el proyecto solo tiene cuatro recursos.
+
+**Patrones más útiles.**
+- *Decorator*: fue el de mayor impacto inmediato, porque eliminó la mayor parte del código repetido.
+- *Repository*: separó la lógica de negocio del formato de almacenamiento; cambiar de JSON a una base de datos ahora solo implicaría nuevos repositorios.
+- *Singleton*: resolvió las copias inconsistentes de los datos, aunque exige cuidado con la concurrencia y con las pruebas (por eso incluí `reset()` y un lock).
+- *Strategy* y *Factory*: aportan flexibilidad (cambiar la validación del token, inyectar otra base de datos en las pruebas), aunque su beneficio es menor en un proyecto tan pequeño.
+
+**Aprendizaje principal.** Los patrones no se aplican por sí mismos: cada uno debe responder a un *code smell* concreto. Aquí cada patrón nació de un problema identificado y medible (duplicación, acoplamiento, baja cohesión), y por eso el código quedó más corto, más legible y más fácil de probar. Si lo repitiera, escribiría las pruebas de caracterización antes de tocar el código, para tener desde el inicio una red de seguridad.
+
+**Qué mejoraría a futuro.** Reemplazar el token fijo por JWT con usuarios reales (aprovechando el Strategy ya existente), migrar la persistencia a una base de datos relacional, validar que el producto pertenezca a una categoría existente y agregar documentación OpenAPI.
