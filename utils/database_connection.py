@@ -1,79 +1,52 @@
+"""Patrón Singleton (por ruta de archivo).
+
+Antes cada request creaba un DatabaseConnection nuevo que releía el JSON completo,
+y cada recurso mantenía una copia propia de los datos (inconsistencias entre copias).
+Ahora existe UNA conexión por archivo, compartida y protegida con un lock.
+"""
 import json
+import os
+import threading
+
 
 class DatabaseConnection:
-    def __init__(self, json_file_path):
-        self.json_file_path = json_file_path
-        self.data = None
+    _instances: dict = {}
+    _instances_lock = threading.Lock()
 
-    def connect(self):
+    def __new__(cls, json_file_path: str):
+        path = os.path.abspath(json_file_path)
+        with cls._instances_lock:
+            instance = cls._instances.get(path)
+            if instance is None:
+                instance = super().__new__(cls)
+                instance._init(path)
+                cls._instances[path] = instance
+            return instance
+
+    def _init(self, path: str) -> None:
+        self.json_file_path = path
+        self._lock = threading.RLock()
+        self._data = self._load()
+
+    def _load(self) -> dict:
         try:
-            with open(self.json_file_path, 'r') as json_file:
-                self.data = json.load(json_file)
+            with open(self.json_file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
         except FileNotFoundError:
-            self.data = None
-            print("Error: json file not found.")
+            return {}
 
-    def get_products(self):
-        if self.data:
-            return self.data.get('products', [])
-        else:
-            return []
+    def get_collection(self, name: str) -> list:
+        with self._lock:
+            return list(self._data.get(name, []))
 
-    def add_product(self, new_product):
-        if self.data:
-            products = self.data.get('products', [])
-            products.append(new_product)
-            self.data['products'] = products
-            with open(self.json_file_path, 'w') as json_file:
-                json.dump(self.data, json_file, indent=4)
-        else:
-            print("Error: something went wrong adding the product")
+    def save_collection(self, name: str, items: list) -> None:
+        with self._lock:
+            self._data[name] = list(items)
+            with open(self.json_file_path, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=4)
 
-    def get_categories(self):
-        if self.data:
-            return self.data.get('categories', [])
-        else:
-            return []
-
-    def add_category(self, new_category):
-        if self.data:
-            categories = self.data.get('categories', [])
-            categories.append(new_category)
-            self.data['categories'] = categories
-            with open(self.json_file_path, 'w') as json_file:
-                json.dump(self.data, json_file, indent=4)
-        else:
-            print("Error: something went wrond adding category")
-
-    def remove_category(self, category_name):
-        if self.data:
-            categories = self.data.get('categories', [])
-            categories = [cat for cat in categories if cat["name"] != category_name] 
-            self.data['categories'] = categories
-
-            with open(self.json_file_path, 'w') as json_file:
-                json.dump(self.data, json_file, indent=4)
-        else:
-            print("Error: something went wrond removing category")
-
-    def get_favorites(self):
-        if self.data:
-            return self.data.get('favorites', [])
-        else:
-            return []
-
-    def add_favorite(self, new_favorite):
-        if self.data:
-            favorites = self.data.get('favorites', [])
-            favorites.append(new_favorite)
-            self.data['favorites'] = favorites
-            with open(self.json_file_path, 'w') as json_file:
-                json.dump(self.data, json_file, indent=4)
-        else:
-            print("Error: something went wrong adding the favorite product")
-
-
-
-
-            
-
+    @classmethod
+    def reset(cls) -> None:
+        """Descarta las instancias (útil en pruebas)."""
+        with cls._instances_lock:
+            cls._instances.clear()

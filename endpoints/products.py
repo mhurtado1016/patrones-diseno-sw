@@ -1,55 +1,28 @@
-from flask_restful import Resource, reqparse
-import json
 from flask import request
-from utils.database_connection import DatabaseConnection
+from flask_restful import Resource, reqparse
+
 from auth.decorators import require_auth
 
-class ProductsResource(Resource):
-    def __init__(self):
-       
-        self.db = DatabaseConnection('db.json')
-        self.db.connect()
 
-        self.products = self.db.get_products()
-        self.parser = reqparse.RequestParser()
-        
+class ProductsResource(Resource):
+    def __init__(self, repository):
+        self.repo = repository
+
     @require_auth
     def get(self, product_id=None):
-        args = self.parser.parse_args()
-        category_filter = request.args.get('category')
-      
-
-
-        if category_filter:
-            filtered_products = [p for p in self.products if p['category'].lower() == category_filter.lower()]
-            return filtered_products 
-        
+        category = request.args.get("category")
+        if category:
+            return self.repo.find_by_category(category)
         if product_id is not None:
-            product = next((p for p in self.products if p['id'] == product_id), None)
-            if product is not None:
-                return product
-            else:
-                return {'message': 'Product not found'}, 404
-              
-        return self.products
+            product = self.repo.find_by_id(product_id)
+            return product if product else ({"message": "Product not found"}, 404)
+        return self.repo.all()
 
     @require_auth
     def post(self):
         parser = reqparse.RequestParser()
-        parser.add_argument('name', type=str, required=True, help='Name of the product')
-        parser.add_argument('category', type=str, required=True, help='Category of the product')
-        parser.add_argument('price', type=float, required=True, help='Price of the product')
-
-        args = parser.parse_args()
-        new_product = {
-            'id': len(self.products) + 1,
-            'name': args['name'],
-            'category': args['category'],
-            'price': args['price']
-        }
-
-        self.products.append(new_product)
-        self.db.add_product(new_product)
-        return {'mensaje': 'Product added', 'product': new_product}, 201
-
-
+        parser.add_argument("name", type=str, required=True, help="Name of the product")
+        parser.add_argument("category", type=str, required=True, help="Category of the product")
+        parser.add_argument("price", type=float, required=True, help="Price of the product")
+        product = self.repo.add(parser.parse_args())
+        return {"message": "Product added", "product": product}, 201
