@@ -103,6 +103,7 @@ classDiagram
 
 ## 6. Historial de commits
 ```
+15cbdeb docs: REFLECTION.md y requirements.txt
 f9057c9 test: suite de pruebas de la API (16 casos)
 5675d46 refactor(data): Singleton + Repository + Factory; endpoints delgados; app factory
 56e5947 refactor(auth): Strategy + Decorator para autenticación, config central
