@@ -2,9 +2,7 @@ from flask import Flask, request
 from flask_restful import Resource, Api, reqparse
 import json
 from utils.database_connection import DatabaseConnection
-
-def is_valid_token(token):
-    return token == 'abcd1234'
+from auth.decorators import require_auth
 
 class CategoriesResource(Resource):
     def __init__(self):
@@ -15,12 +13,8 @@ class CategoriesResource(Resource):
         self.categories_data = self.db.get_categories()
         self.parser = reqparse.RequestParser()
 
+    @require_auth
     def get(self, category_id=None):
-        token = request.headers.get('Authorization')
-        if not token:
-            return { 'message': 'Unauthorized acces token not found'}, 401
-        if not is_valid_token(token):
-           return { 'message': 'Unauthorized invalid token'}, 401
 
         if category_id is not None:
             category = next((p for p in self.categories_data if p['id'] == category_id), None)
@@ -31,12 +25,8 @@ class CategoriesResource(Resource):
          
         return self.categories_data 
 
+    @require_auth
     def post(self):
-        token = request.headers.get('Authorization')
-        if not token:
-            return { 'message': 'Unauthorized acces token not found'}, 401
-        if not is_valid_token(token):
-           return { 'message': 'Unauthorized invalid token'}, 401
 
         self.parser.add_argument('name', type=str, required=True, help='Name of the category')
  
@@ -62,12 +52,8 @@ class CategoriesResource(Resource):
 
         return {'message': 'Category added successfully'}, 201
 
+    @require_auth
     def delete(self):
-        token = request.headers.get('Authorization')
-        if not token:
-            return { 'message': 'Unauthorized acces token not found'}, 401
-        if not is_valid_token(token):
-           return { 'message': 'Unauthorized invalid token'}, 401
 
         args = self.parser.parse_args()
         self.parser.add_argument('name', type=str, required=True, help='Name of the category')

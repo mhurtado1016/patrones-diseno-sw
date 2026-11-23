@@ -2,9 +2,7 @@ from flask_restful import Resource, reqparse
 import json
 from flask import request
 from utils.database_connection import DatabaseConnection
-
-def is_valid_token(token):
-    return token == 'abcd1234'
+from auth.decorators import require_auth
 
 class ProductsResource(Resource):
     def __init__(self):
@@ -15,16 +13,12 @@ class ProductsResource(Resource):
         self.products = self.db.get_products()
         self.parser = reqparse.RequestParser()
         
+    @require_auth
     def get(self, product_id=None):
         args = self.parser.parse_args()
-        token = request.headers.get('Authorization')
         category_filter = request.args.get('category')
       
-        if not token:
-            return { 'message': 'Unauthorized acces token not found'}, 401
 
-        if not is_valid_token(token):
-           return { 'message': 'Unauthorized invalid token'}, 401
 
         if category_filter:
             filtered_products = [p for p in self.products if p['category'].lower() == category_filter.lower()]
@@ -39,8 +33,8 @@ class ProductsResource(Resource):
               
         return self.products
 
+    @require_auth
     def post(self):
-        token = request.headers.get('Authorization')
         parser = reqparse.RequestParser()
         parser.add_argument('name', type=str, required=True, help='Name of the product')
         parser.add_argument('category', type=str, required=True, help='Category of the product')

@@ -1,16 +1,13 @@
-from flask import Blueprint, request
-from flask_restful import Resource, Api
+from flask import request
+from flask_restful import Resource
+
+import config
+
 
 class AuthenticationResource(Resource):
     def post(self):
-        username = request.json.get('username')
-        password = request.json.get('password')
-
-        if username == 'student' and password == 'desingp':
-            token = 'abcd12345'
-            return {'token': token}, 200
-        else:
-            return {'message': 'unauthorized'}, 401
-
-
-
+        body = request.get_json(silent=True) or {}
+        if (body.get("username") == config.DEMO_USERNAME
+                and body.get("password") == config.DEMO_PASSWORD):
+            return {"token": config.DEMO_TOKEN}, 200
+        return {"message": "unauthorized"}, 401
