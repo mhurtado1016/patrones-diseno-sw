@@ -67,3 +67,17 @@ def test_data_shared_across_requests(client, auth):
     client.post("/categories", json={"name": "b"}, headers=auth)
     ids = [c["id"] for c in client.get("/categories", headers=auth).get_json()]
     assert len(ids) == len(set(ids))
+
+
+def test_create_product_rejects_unknown_category_and_bad_price(client, auth):
+    r = client.post("/products", json={"name": "x", "category": "nope", "price": 5}, headers=auth)
+    assert r.status_code == 400
+    for price in (0, -3):
+        r = client.post("/products", json={"name": "x", "category": "men", "price": price}, headers=auth)
+        assert r.status_code == 400
+
+
+def test_favorite_requires_existing_product(client, auth):
+    r = client.post("/favorites", json={"user_id": 1, "product_id": 9999}, headers=auth)
+    assert r.status_code == 404
+    assert client.get("/favorites", headers=auth).get_json() == []

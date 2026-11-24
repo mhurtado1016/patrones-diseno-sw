@@ -127,3 +127,31 @@ Certainly, here are the improved and corrected steps for your API endpoints:
          }
      }
      ```
+
+
+# Estructura del proyecto (refactorizado)
+
+```
+app.py                  # create_app(db_path, token_validator) – Factory
+config.py               # configuración central
+auth/                   # Strategy (validador de token) + Decorator (@require_auth)
+endpoints/              # recursos Flask-RESTful delgados
+repositories/           # Repository + Factory
+utils/database_connection.py  # Singleton con escritura atómica
+tests/                  # pytest (27 pruebas)
+benchmarks/benchmark.py # original vs refactorizado
+REFLECTION.md           # documentación del análisis y las decisiones
+```
+
+# Pruebas y benchmark
+
+```
+pip install -r requirements.txt
+python -m pytest
+python benchmarks/benchmark.py 500
+```
+
+# Reglas de validación añadidas
+- `POST /products`: la categoría debe existir y `price` debe ser > 0 (400 en caso contrario).
+- `POST /favorites`: el producto debe existir (404 en caso contrario).
+- `POST /products` ahora también requiere token.

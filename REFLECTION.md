@@ -1,7 +1,7 @@
 # REFLECTION.md — Análisis y refactorización de la API REST
 
 ## 1. Resumen
-El proyecto original es una API REST (Flask + Flask-RESTful) para autenticación, productos, categorías y favoritos, con persistencia en `db.json`. Funcionaba parcialmente y tenía varios *code smells* y bugs reales. Se refactorizó en 5 commits aplicando 5 patrones de diseño y se añadió una suite de 16 pruebas (`python -m pytest`).
+El proyecto original es una API REST (Flask + Flask-RESTful) para autenticación, productos, categorías y favoritos, con persistencia en `db.json`. Funcionaba parcialmente y tenía varios *code smells* y bugs reales. Se refactorizó en 5 commits aplicando 5 patrones de diseño y se añadió una suite de 27 pruebas (`python -m pytest`) y un benchmark (`benchmarks/benchmark.py`).
 
 ## 2. Problemas identificados (code smells)
 
@@ -23,13 +23,19 @@ El proyecto original es una API REST (Flask + Flask-RESTful) para autenticación
 | 14 | `app` global con estado y rutas en el módulo → no se puede probar con otra base de datos | `app.py` | Baja testabilidad |
 | 15 | `__pycache__` versionado | repo | Higiene del repositorio |
 
+| 16 | Autorización débil: el token es el mismo para todos y `user_id` viene en el body de `/favorites`, así que cualquier usuario autenticado puede leer o borrar favoritos ajenos | `favorites.py` | Control de acceso insuficiente |
+| 17 | Escritura del JSON no atómica: si el proceso cae a mitad de `json.dump`, `db.json` queda corrupto | `database_connection.py` | Falta de robustez |
+| 18 | Sin validación de dominio: se podía crear un producto con categoría inexistente o precio ≤ 0, y marcar como favorito un producto que no existe | `products.py`, `favorites.py` | Integridad de datos |
+
+*Estado de los nuevos hallazgos:* 17 y 18 **se corrigieron** (sección 3.6); el 16 queda como **problema pendiente** (ver Anexo), porque resolverlo requiere un modelo de usuarios/JWT que excede el alcance de esta actividad.
+
 *Verificado ejecutando el original:* login → 401 al usar su propio token; `POST /favorites` → 201 con favoritos vacíos después; categoría duplicada → 201.
 
 ## 3. Patrones aplicados
 
 ### 3.1 Strategy — validación de tokens (`auth/token_validator.py`)
 **Problema:** la regla de validación estaba pegada a cada endpoint (smells 1–3).
-**Solución:** interfaz `TokenValidator` con `StaticTokenValidator`. Cambiar a JWT o a una tabla de usuarios solo requiere otra implementación y `set_validator(...)`, sin tocar endpoints (OCP).
+**Solución:** interfaz `TokenValidator` con `StaticTokenValidator`. El validador se **inyecta** en `create_app(token_validator=...)` y se guarda en `app.extensions`, sin variables globales mutables; dos apps pueden tener validadores distintos (probado en `tests/test_infrastructure.py`). Cambiar a JWT solo requiere otra implementación, sin tocar endpoints (OCP).
 
 ### 3.2 Decorator — `@require_auth` (`auth/decorators.py`)
 **Problema:** ~10 bloques idénticos de 4 líneas por método.
@@ -38,15 +44,30 @@ El proyecto original es una API REST (Flask + Flask-RESTful) para autenticación
 ### 3.3 Singleton — `DatabaseConnection` (`utils/database_connection.py`)
 **Problema:** múltiples conexiones y copias de datos por request (smell 5).
 **Solución:** una única instancia por archivo, con `RLock` para escrituras concurrentes del servidor de desarrollo. Todos los repositorios comparten la misma fuente de verdad. Incluye `reset()` para pruebas.
+La escritura es **atómica** (archivo temporal + `os.replace`) y la memoria solo se actualiza si el disco se escribió bien. Limitación conocida: el lock protege dentro de un proceso, no entre varios workers.
 *Decisión:* Singleton "por ruta" (no global absoluto) para poder usar un JSON temporal en tests.
 
 ### 3.4 Repository — `repositories/*` 
 **Problema:** una clase con la lógica de persistencia de todo el dominio (smells 6, 7).
-**Solución:** `JsonRepository` (CRUD genérico: `all`, `find_by_id`, `add`, id = max+1) y repositorios específicos: `ProductRepository.find_by_category`, `CategoryRepository.find_by_name/remove_by_name`, `FavoriteRepository.add/remove`. Los endpoints dependen de una abstracción de acceso a datos y no del formato de almacenamiento (DIP): migrar a SQLite solo implica nuevos repositorios.
+**Solución:** `JsonRepository` (`all`, `add`) e `IdentifiedRepository` (añade `find_by_id` e id = max+1) y repositorios específicos. `FavoriteRepository` hereda solo de `JsonRepository`, porque los favoritos no tienen `id` (así se respeta Liskov): `ProductRepository.find_by_category`, `CategoryRepository.find_by_name/remove_by_name`, `FavoriteRepository.add/remove`. Los endpoints dependen de una abstracción de acceso a datos y no del formato de almacenamiento (DIP): migrar a SQLite solo implica nuevos repositorios.
 
 ### 3.5 Factory — `RepositoryFactory` y `create_app()` (`repositories/factory.py`, `app.py`)
 **Problema:** construcción de objetos dispersa y estado global (smell 14).
 **Solución:** `RepositoryFactory.create("products")` centraliza la construcción; `create_app(db_path)` (Factory Method) ensambla Flask, rutas y repositorios inyectados con `resource_class_kwargs`. Permite probar con una base temporal.
+
+### 3.6 Validaciones de dominio y mejoras de robustez
+- `POST /products` rechaza (400) categorías inexistentes y precios ≤ 0; `POST /favorites` devuelve 404 si el producto no existe. Los repositorios exponen `exists(...)` para esto.
+- Pruebas añadidas para estas reglas, la escritura atómica (incluido fallo de disco), el Singleton, el Factory y un validador alternativo.
+
+### 3.7 Medición de rendimiento
+`python benchmarks/benchmark.py 500` extrae el primer commit (original) y compara 500 `GET /products`, mediana de 5 corridas, con el `db.json` de ~24 productos:
+
+| Versión | Total | Por request |
+|---|---|---|
+| Original (relee JSON y crea objetos por request) | 0.110 s | 0.22 ms |
+| Refactorizada (Singleton, datos en memoria) | 0.075 s | 0.15 ms |
+
+Mejora ≈ ×1.5 en este caso. Es una cifra modesta porque el archivo es pequeño; el beneficio crece con el tamaño de los datos. La principal ganancia del refactor es de mantenibilidad, no de velocidad.
 
 ## 4. Diagramas
 
@@ -67,7 +88,8 @@ classDiagram
     class create_app{ +create_app(db_path) }
     class RepositoryFactory{ +create(name) }
     class DatabaseConnection{ <<Singleton>> +get_collection() +save_collection() }
-    class JsonRepository{ +all() +find_by_id() +add() }
+    class JsonRepository{ +all() +add() }
+    class IdentifiedRepository{ +find_by_id() +add() }
     class ProductRepository
     class CategoryRepository
     class FavoriteRepository
@@ -78,10 +100,12 @@ classDiagram
     class CategoriesResource
     class FavoritesResource
     create_app --> RepositoryFactory
+    create_app --> TokenValidator : inyecta
     RepositoryFactory --> DatabaseConnection
     RepositoryFactory ..> JsonRepository
-    JsonRepository <|-- ProductRepository
-    JsonRepository <|-- CategoryRepository
+    JsonRepository <|-- IdentifiedRepository
+    IdentifiedRepository <|-- ProductRepository
+    IdentifiedRepository <|-- CategoryRepository
     JsonRepository <|-- FavoriteRepository
     TokenValidator <|.. StaticTokenValidator
     require_auth --> TokenValidator
@@ -98,7 +122,7 @@ classDiagram
 - **Favoritos** ahora se guardan en la clave `favorites` de `db.json` (ya existía, vacía), en lugar de un `favorites.json` inexistente.
 - **Orden de prioridad en `GET /products`:** se conserva el original (filtro `category` antes que `product_id`).
 - **`db.json` no se modificó** en la refactorización (tenía ids repetidos 21 y 23 por pruebas manuales del original; `db_bck.json` es la copia limpia y las pruebas usan una copia temporal).
-- **Cambios intencionales de comportamiento** (todos corrigen bugs): categoría duplicada → 400; `POST /products` exige token; clave `message`; favoritos persisten; `DELETE /categories` funciona correctamente.
+- **Cambios intencionales de comportamiento** (todos corrigen bugs o añaden integridad): producto con categoría inexistente o precio ≤ 0 → 400; favorito de producto inexistente → 404; categoría duplicada → 400; `POST /products` exige token; clave `message`; favoritos persisten; `DELETE /categories` funciona correctamente.
 - No se añadió Flask-JWT, SQLAlchemy ni blueprints: se evitó sobre-ingeniería para un API de 4 recursos.
 
 ## 6. Historial de commits
@@ -113,6 +137,8 @@ f9057c9 test: suite de pruebas de la API (16 casos)
 Cómo verificar: `pip install -r requirements.txt && python -m pytest` → 16 passed.
 
 ## 7. Revisión con un par
+*Autorrevisión previa (no sustituye la retroalimentación del compañero):* se detectaron el estado global del validador, la violación de Liskov en `FavoriteRepository`, la escritura no atómica, la falta de validaciones de dominio y la falta de pruebas del Factory/Strategy. **Aplicados:** inyección del validador, jerarquía `JsonRepository`/`IdentifiedRepository`, escritura atómica, validaciones y pruebas, y el benchmark. **Pendiente:** autorización por usuario (ver Anexo).
+
 *(Completar tras la revisión: observaciones recibidas, cambios aplicados y valoración del trabajo del compañero según la rúbrica.)*
 
 ## 8. Reflexión personal
@@ -130,3 +156,9 @@ Cómo verificar: `pip install -r requirements.txt && python -m pytest` → 16 pa
 **Aprendizaje principal.** Los patrones no se aplican por sí mismos: cada uno debe responder a un *code smell* concreto. Aquí cada patrón nació de un problema identificado y medible (duplicación, acoplamiento, baja cohesión), y por eso el código quedó más corto, más legible y más fácil de probar. Si lo repitiera, escribiría las pruebas de caracterización antes de tocar el código, para tener desde el inicio una red de seguridad.
 
 **Qué mejoraría a futuro.** Reemplazar el token fijo por JWT con usuarios reales (aprovechando el Strategy ya existente), migrar la persistencia a una base de datos relacional, validar que el producto pertenezca a una categoría existente y agregar documentación OpenAPI.
+
+## Anexo. Limitaciones y trabajo pendiente
+- Autorización por usuario (`user_id` en el body de `/favorites`): requiere JWT con identidad; el Strategy ya permite incorporarlo.
+- El lock del Singleton no cubre varios procesos; para producción haría falta una base de datos real.
+- `reqparse` está obsoleto en Flask-RESTful; migrar a Marshmallow/Pydantic.
+- Faltan `PUT`/`DELETE` de productos y `DELETE /categories/<id>`.

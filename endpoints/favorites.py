@@ -11,8 +11,9 @@ def _favorite_parser():
 
 
 class FavoritesResource(Resource):
-    def __init__(self, repository):
+    def __init__(self, repository, products):
         self.repo = repository
+        self.products = products
 
     @require_auth
     def get(self):
@@ -21,6 +22,8 @@ class FavoritesResource(Resource):
     @require_auth
     def post(self):
         args = _favorite_parser().parse_args()
+        if not self.products.exists(args["product_id"]):
+            return {"message": "Product not found"}, 404
         favorite = self.repo.add({"user_id": args["user_id"], "product_id": args["product_id"]})
         return {"message": "Product added to favorites", "favorite": favorite}, 201
 

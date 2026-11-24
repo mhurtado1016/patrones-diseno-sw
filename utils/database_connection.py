@@ -6,6 +6,7 @@ Ahora existe UNA conexión por archivo, compartida y protegida con un lock.
 """
 import json
 import os
+import tempfile
 import threading
 
 
@@ -41,9 +42,22 @@ class DatabaseConnection:
 
     def save_collection(self, name: str, items: list) -> None:
         with self._lock:
-            self._data[name] = list(items)
-            with open(self.json_file_path, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, indent=4)
+            new_data = {**self._data, name: list(items)}
+            self._write_atomically(new_data)
+            self._data = new_data  # solo se actualiza la memoria si el disco se escribió bien
+
+    def _write_atomically(self, data: dict) -> None:
+        """Escribe a un temporal y lo renombra: nunca deja el JSON a medias."""
+        directory = os.path.dirname(self.json_file_path)
+        fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+            os.replace(tmp_path, self.json_file_path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
 
     @classmethod
     def reset(cls) -> None:

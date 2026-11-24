@@ -5,8 +5,9 @@ from auth.decorators import require_auth
 
 
 class ProductsResource(Resource):
-    def __init__(self, repository):
+    def __init__(self, repository, categories):
         self.repo = repository
+        self.categories = categories
 
     @require_auth
     def get(self, product_id=None):
@@ -24,5 +25,10 @@ class ProductsResource(Resource):
         parser.add_argument("name", type=str, required=True, help="Name of the product")
         parser.add_argument("category", type=str, required=True, help="Category of the product")
         parser.add_argument("price", type=float, required=True, help="Price of the product")
-        product = self.repo.add(parser.parse_args())
+        args = parser.parse_args()
+        if args["price"] <= 0:
+            return {"message": "Price must be greater than 0"}, 400
+        if not self.categories.exists(args["category"]):
+            return {"message": "Category does not exist"}, 400
+        product = self.repo.add(args)
         return {"message": "Product added", "product": product}, 201
