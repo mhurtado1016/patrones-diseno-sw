@@ -67,7 +67,33 @@ La escritura es **atómica** (archivo temporal + `os.replace`) y la memoria solo
 | Original (relee JSON y crea objetos por request) | 0.110 s | 0.22 ms |
 | Refactorizada (Singleton, datos en memoria) | 0.075 s | 0.15 ms |
 
-Mejora ≈ ×1.5 en este caso. Es una cifra modesta porque el archivo es pequeño; el beneficio crece con el tamaño de los datos. La principal ganancia del refactor es de mantenibilidad, no de velocidad.
+Mejora ≈ ×1.3–1.5 según la corrida (la medición varía unas décimas entre ejecuciones). Es una cifra modesta porque el archivo es pequeño; el beneficio crece con el tamaño de los datos. La principal ganancia del refactor es de mantenibilidad, no de velocidad.
+
+### 3.8 Evidencias de funcionamiento tras la refactorización
+Capturas de peticiones reales (`curl`) contra la API refactorizada, con una copia temporal de la base de datos (carpeta `docs/capturas/`):
+
+**Login y autenticación** — token válido, credenciales malas y token ausente/inválido (401):
+![Login y autenticación](docs/capturas/01_login_y_autenticacion.png)
+
+**Productos** — listar, filtrar por categoría, consultar por id y 404:
+![Productos](docs/capturas/02_productos.png)
+
+**Crear producto y validaciones** — 201 con datos válidos; 400 con categoría inexistente o precio 0; 401 sin token:
+![Crear producto](docs/capturas/03_crear_producto_validaciones.png)
+
+**Categorías** — crear, duplicado (400), eliminar y 404:
+![Categorías](docs/capturas/04_categorias.png)
+
+**Favoritos** — persisten, validan el producto (404) y se eliminan:
+![Favoritos](docs/capturas/05_favoritos.png)
+
+**Pruebas automáticas** — 27 pruebas pasan:
+![Pruebas](docs/capturas/06_pruebas_automaticas.png)
+
+**Benchmark** — original vs refactorizado:
+![Benchmark](docs/capturas/07_benchmark.png)
+
+> Nota: son capturas de terminal generadas a partir de la salida real de las peticiones. Si el docente exige una herramienta concreta, se pueden sustituir por capturas de Insomnia o Postman con las mismas peticiones.
 
 ## 4. Diagramas
 
@@ -137,9 +163,21 @@ f9057c9 test: suite de pruebas de la API (16 casos)
 Cómo verificar: `pip install -r requirements.txt && python -m pytest` → 16 passed.
 
 ## 7. Revisión con un par
-*Autorrevisión previa (no sustituye la retroalimentación del compañero):* se detectaron el estado global del validador, la violación de Liskov en `FavoriteRepository`, la escritura no atómica, la falta de validaciones de dominio y la falta de pruebas del Factory/Strategy. **Aplicados:** inyección del validador, jerarquía `JsonRepository`/`IdentifiedRepository`, escritura atómica, validaciones y pruebas, y el benchmark. **Pendiente:** autorización por usuario (ver Anexo).
+*Autorrevisión previa (no sustituye la retroalimentación del compañero; completar con ella cuando se reciba).*
 
-*(Completar tras la revisión: observaciones recibidas, cambios aplicados y valoración del trabajo del compañero según la rúbrica.)*
+**Fortalezas identificadas**
+- Cada patrón responde a un problema concreto y documentado (duplicación del token, copias de datos, construcción dispersa), sin sobre-ingeniería.
+- Los endpoints pasaron de mezclar HTTP, autenticación y persistencia a ser delgados y legibles; la autenticación está en un solo lugar.
+- Se corrigieron bugs reales del original (token inconsistente, favoritos que no persistían, categorías duplicadas, ids repetidos).
+- Hay 27 pruebas automáticas, benchmark reproducible y un historial de commits descriptivo.
+
+**Oportunidades de mejora detectadas y aplicadas**
+- El validador de tokens era una variable global; ahora se inyecta en `create_app()`.
+- `FavoriteRepository` heredaba `find_by_id` sin tener `id`; se separó la jerarquía (`JsonRepository` / `IdentifiedRepository`).
+- La escritura del JSON no era atómica; ahora usa archivo temporal + `os.replace`.
+- Se añadieron validaciones de dominio (categoría y producto existentes, precio > 0) y pruebas del Factory, del Strategy y de la escritura atómica.
+
+**Pendiente (fuera del alcance de la actividad):** autorización por usuario y concurrencia entre procesos (ver Anexo).
 
 ## 8. Reflexión personal
 
